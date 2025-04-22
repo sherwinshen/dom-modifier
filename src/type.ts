@@ -31,6 +31,11 @@ type MutationController = { revert: () => void };
  * 变更执行函数（不直接更改dom，获取变更值）
  */
 type WidgetMutate = () => InsertWidget;
+type PositionMutate = () => ElementMove;
+type ClassnameMutate = (oldClassSet: Set<string>) => void;
+type StyleMutate = (oldStyleObj: Record<string, string>) => void;
+type HtmlMutate = (oldInnerHTML: string) => string;
+type AttributeMutate = (oldValue: string | null) => string | null;
 
 /**
  * 变体数据（一个变更对应多个元素）
@@ -44,7 +49,34 @@ interface WidgetMutation extends BaseMutation {
   kind: 'widget';
   mutate: WidgetMutate;
 }
-type Mutation = WidgetMutation;
+interface PositionMutation extends BaseMutation {
+  kind: 'position';
+  mutate: PositionMutate;
+}
+interface ClassnameMutation extends BaseMutation {
+  kind: 'class';
+  mutate: ClassnameMutate;
+}
+interface StyleMutation extends BaseMutation {
+  kind: 'style';
+  mutate: StyleMutate;
+}
+interface HtmlMutation extends BaseMutation {
+  kind: 'html';
+  mutate: HtmlMutate;
+}
+interface AttributeMutation extends BaseMutation {
+  kind: 'attribute';
+  attribute: string;
+  mutate: AttributeMutate;
+}
+type Mutation =
+  | WidgetMutation
+  | PositionMutation
+  | ClassnameMutation
+  | StyleMutation
+  | HtmlMutation
+  | AttributeMutation;
 
 /**
  * 元素变异记录（一个元素对应多个变体）
@@ -60,8 +92,37 @@ interface ElementPropertyRecord<T, V> {
   mutationRunner: (record: ElementPropertyRecord<T, V>, mutation?: T[]) => void; // 变更执行
   getCurrentValue: (el: Element) => V; // 获取当前数据
 }
-type WidgetRecord = ElementPropertyRecord<WidgetMutation, ElementPositionWithNode | null>;
+type WidgetRecord = ElementPropertyRecord<WidgetMutation, null>;
+type PositionRecord = ElementPropertyRecord<PositionMutation, ElementPositionWithNode | null>;
+type ClassnameRecord = ElementPropertyRecord<ClassnameMutation, string>;
+type StyleRecord = ElementPropertyRecord<StyleMutation, string>;
+type HtmlRecord = ElementPropertyRecord<HtmlMutation, string>;
+type AttributeRecord = ElementPropertyRecord<AttributeMutation, string | null>;
 type ElementRecord = {
   el: Element;
   widgets?: WidgetRecord;
+  position?: PositionRecord;
+  classes?: ClassnameRecord;
+  styles?: StyleRecord;
+  html?: HtmlRecord;
+  attributes?: {
+    [key in string]: AttributeRecord;
+  };
+};
+
+/**
+ * 变更协议
+ */
+type OperateSchema = {
+  selector: string;
+  attribute: string;
+  action: 'append' | 'remove' | 'set';
+  value?: string;
+  // 元素删除
+  domRemoveType?: 'display' | 'opacity' | 'visibility';
+  // 元素移动
+  parentSelector?: string;
+  insertBeforeSelector?: string;
+  // 元素插入
+  widgetInsertPosition?: InsertPosition;
 };
