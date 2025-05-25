@@ -35,13 +35,13 @@ type PositionMutate = () => ElementMove;
 type ClassnameMutate = (oldClassSet: Set<string>) => void;
 type StyleMutate = (oldStyleObj: Record<string, string>) => void;
 type HtmlMutate = (oldInnerHTML: string) => string;
-type AttributeMutate = (oldValue: string | null) => string | null;
+type AttributeMutate = (oldAttributeValue: string | null) => string | null;
 
 /**
  * 变体数据（一个变更对应多个元素）
  */
 interface BaseMutation {
-  id: string; // 唯一标识，可用于撤销 Widget 变更时查找插入元素
+  mutationId: string;
   selector: string;
   elements: Set<Element>;
 }
@@ -82,7 +82,7 @@ type Mutation =
  * 元素变异记录（一个元素对应多个变体）
  */
 interface ElementPropertyRecord<T, V> {
-  id: string; // 唯一标识
+  elementId: string; // 元素id
   el: Element; // 元素
   attr: string; // 属性名
   mutations: T[]; // 变体数据
@@ -113,16 +113,30 @@ type ElementRecord = {
 /**
  * 变更协议
  */
-type OperateSchema = {
+type HtmlSchema =
+  | { type: 'html'; selector: string; action: 'append' | 'set'; value: string }
+  | { type: 'html'; selector: string; action: 'remove' }
+  | { type: 'html'; selector: string; action: 'custom'; value: HtmlMutate };
+type ClassSchema =
+  | { type: 'class'; selector: string; action: 'append' | 'remove' | 'set'; value: string }
+  | { type: 'class'; selector: string; action: 'custom'; value: ClassnameMutate };
+type StyleSchema =
+  | { type: 'style'; selector: string; action: 'append' | 'remove' | 'set'; value: string }
+  | { type: 'style'; selector: string; action: 'custom'; value: StyleMutate };
+type AttributeSchema =
+  | { type: 'attribute'; selector: string; attribute: string; action: 'append' | 'set'; value: string }
+  | { type: 'attribute'; selector: string; attribute: string; action: 'remove' }
+  | { type: 'attribute'; selector: string; attribute: string; action: 'custom'; value: AttributeMutate };
+type WidgetSchema = {
+  type: 'widget';
   selector: string;
-  attribute: string;
-  action: 'append' | 'remove' | 'set';
-  value?: string;
-  // 元素删除
-  domRemoveType?: 'display' | 'opacity' | 'visibility';
-  // 元素移动
-  parentSelector?: string;
-  insertBeforeSelector?: string;
-  // 元素插入
-  widgetInsertPosition?: InsertPosition;
+  value: string;
+  widgetInsertPosition: InsertPosition;
 };
+type PositionSchema = {
+  type: 'position';
+  selector: string;
+  parentSelector: string;
+  insertBeforeSelector?: string | null;
+};
+type OperateSchema = HtmlSchema | ClassSchema | StyleSchema | WidgetSchema | PositionSchema | AttributeSchema;

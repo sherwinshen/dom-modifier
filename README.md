@@ -1,103 +1,132 @@
-# TSDX User Guide
+# DOM-Modifier
 
-Congrats! You just saved yourself hours of work by bootstrapping this project with TSDX. Let’s get you oriented with what’s here and how to use it.
+For those times you need to surgically manipulate third-party HTML while keeping your changes persistent—even when the DOM updates.
 
-> This TSDX setup is meant for developing libraries (not apps!) that can be published to NPM. If you’re looking to build a Node app, you could use `ts-node-dev`, plain `ts-node`, or simple `tsc`.
+# Features
 
-> If you’re new to TypeScript, checkout [this handy cheatsheet](https://devhints.io/typescript)
+- **Diverse Operations**: Supports a wide range of operations, including HTML, class, style, and attribute changes, as well as element positioning and inserting new content based on elements.
+- **TypeScript & 100% Test Coverage**: Built with TypeScript for robustness and reliability, backed by comprehensive tests.
+- **Persistent Mutations**: Keeps mutations intact even if the underlying element is updated externally (e.g., by React).
+- **Dynamic Element Support**: Automatically applies mutations to new matching elements added to the DOM.
+- **Easy Mutation Removal**: Allows mutations to be easily removed at any time.
 
-## Commands
+# Installation
 
-TSDX scaffolds your new library inside `/src`.
-
-To run TSDX, use:
-
-```bash
-npm start # or yarn start
+```
+npm i --save dom-modifier
 ```
 
-This builds to `/dist` and runs the project in watch mode so any edits you save inside `src` causes a rebuild to `/dist`.
+# Usage
 
-To do a one-off build, use `npm run build` or `yarn build`.
+## Basic Usage
 
-To run tests, use `npm test` or `yarn test`.
+```typescript
+import domModifier from 'dom-modifier';
 
-## Configuration
+const controllers = domModifier([schema1, schema2]);
 
-Code quality is set up for you with `prettier`, `husky`, and `lint-staged`. Adjust the respective fields in `package.json` accordingly.
-
-### Jest
-
-Jest tests are set up to run with `npm test` or `yarn test`.
-
-### Bundle Analysis
-
-[`size-limit`](https://github.com/ai/size-limit) is set up to calculate the real cost of your library with `npm run size` and visualize the bundle with `npm run analyze`.
-
-#### Setup Files
-
-This is the folder structure we set up for you:
-
-```txt
-/src
-  index.tsx       # EDIT THIS
-/test
-  blah.test.tsx   # EDIT THIS
-.gitignore
-package.json
-README.md         # EDIT THIS
-tsconfig.json
+// revert
+controllers.forEach(({ revert }) => {
+  revert?.();
+});
 ```
 
-### Rollup
+## Atomic Methods
 
-TSDX uses [Rollup](https://rollupjs.org) as a bundler and generates multiple rollup configs for various module formats and build settings. See [Optimizations](#optimizations) for details.
+```typescript
+import { declarative, attribute, widget, position, styles, classes, html } from 'dom-modifier';
 
-### TypeScript
-
-`tsconfig.json` is set up to interpret `dom` and `esnext` types, as well as `react` for `jsx`. Adjust according to your needs.
-
-## Continuous Integration
-
-### GitHub Actions
-
-Two actions are added by default:
-
-- `main` which installs deps w/ cache, lints, tests, and builds on all pushes against a Node and OS matrix
-- `size` which comments cost comparison of your library on every pull request using [`size-limit`](https://github.com/ai/size-limit)
-
-## Optimizations
-
-Please see the main `tsdx` [optimizations docs](https://github.com/palmerhq/tsdx#optimizations). In particular, know that you can take advantage of development-only optimizations:
-
-```js
-// ./types/index.d.ts
-declare var __DEV__: boolean;
-
-// inside your code...
-if (__DEV__) {
-  console.log('foo');
-}
+const { revert } = declarative(OperateSchema);
+const { revert } = attribute(selector, attribute, (oldAttributeValue: string | null) => string | null);
+const { revert } = widget(selector, () => { position: InsertPosition; content?: string | null});
+const { revert } = position(selector, () => { parentSelector: string; insertBeforeSelector?: string | null});
+const { revert } = styles(selector, (oldStyleObj: Record<string, string>) => void);
+const { revert } = classes(selector, (oldClassSet: Set<string>) => void);
+const { revert } = html(selector, (oldInnerHTML: string) => string);
 ```
 
-You can also choose to install and use [invariant](https://github.com/palmerhq/tsdx#invariant) and [warning](https://github.com/palmerhq/tsdx#warning) functions.
+## Schema
 
-## Module Formats
+```typescript
+type HtmlSchema =
+  | { type: 'html'; selector: string; action: 'append' | 'set'; value: string }
+  | { type: 'html'; selector: string; action: 'remove' }
+  | { type: 'html'; selector: string; action: 'custom'; value: HtmlMutate };
+type ClassSchema =
+  | { type: 'class'; selector: string; action: 'append' | 'remove' | 'set'; value: string }
+  | { type: 'class'; selector: string; action: 'custom'; value: ClassnameMutate };
+type StyleSchema =
+  | { type: 'style'; selector: string; action: 'append' | 'remove' | 'set'; value: string }
+  | { type: 'style'; selector: string; action: 'custom'; value: StyleMutate };
+type AttributeSchema =
+  | { type: 'attribute'; selector: string; attribute: string; action: 'append' | 'set'; value: string }
+  | { type: 'attribute'; selector: string; attribute: string; action: 'remove' }
+  | { type: 'attribute'; selector: string; attribute: string; action: 'custom'; value: AttributeMutate };
+type WidgetSchema = {
+  type: 'widget';
+  selector: string;
+  value: string;
+  widgetInsertPosition: InsertPosition;
+};
+type PositionSchema = {
+  type: 'position';
+  selector: string;
+  parentSelector: string;
+  insertBeforeSelector?: string | null;
+};
+type OperateSchema = HtmlSchema | ClassSchema | StyleSchema | WidgetSchema | PositionSchema | AttributeSchema;
+```
 
-CJS, ESModules, and UMD module formats are supported.
+## Examples
 
-The appropriate paths are configured in `package.json` and `dist/index.js` accordingly. Please report if any issues are found.
+```typescript
+const htmlSchema = [
+  { type: 'html', selector: '#id', action: 'append', value: 'hello world' },
+  { type: 'html', selector: '#id', action: 'set', value: 'hello world' },
+  { type: 'html', selector: '#id', action: 'remove', value: 'hello world' },
+  { type: 'html', selector: '#id', action: 'custom', value: (oldInnerHTML: string) => oldInnerHTML.toUpperCase() },
+];
 
-## Named Exports
+const classesSchema = [
+  { type: 'class', selector: '#id', action: 'append', value: 'text-14px text-red' },
+  { type: 'class', selector: '#id', action: 'set', value: 'text-14px lh-22px' },
+  { type: 'class', selector: '#id', action: 'remove', value: 'text-14px bg-green' },
+  { type: 'class', selector: '#id', action: 'custom', value: (oldClasses: Set<string>) => oldClasses.add('text-14px') },
+];
 
-Per Palmer Group guidelines, [always use named exports.](https://github.com/palmerhq/typescript#exports) Code split inside your React app instead of your React library.
+const styleSchema = [
+  { type: 'style', selector: '#id', action: 'append', value: 'color: red; font-size: 14px;' },
+  { type: 'style', selector: '#id', action: 'set', value: 'color: red; font-size: 14px;' },
+  { type: 'style', selector: '#id', action: 'remove', value: 'color fontSize' },
+  {
+    type: 'style',
+    selector: '#id',
+    action: 'custom',
+    value: (oldStyle: Record<string, string>) => (oldStyle.color = 'red'),
+  },
+];
 
-## Including Styles
+const attributeSchema = [
+  { type: 'attribute', selector: '#id', attribute: 'data-id', action: 'append', value: '123' },
+  { type: 'attribute', selector: '#id', attribute: 'data-id', action: 'set', value: '123' },
+  { type: 'attribute', selector: '#id', attribute: 'data-id', action: 'remove' },
+  {
+    type: 'attribute',
+    selector: '#id',
+    attribute: 'data-id',
+    action: 'custom',
+    value: (oldValue: string | null) => (oldValue ? oldValue + '123' : '123'),
+  },
+];
 
-There are many ways to ship styles, including with CSS-in-JS. TSDX has no opinion on this, configure how you like.
+const positionSchema = [
+  { type: 'position', selector: '#id', insertBeforeSelector: '#child', parentSelector: '#parent' },
+];
 
-For vanilla CSS, you can include it at the root directory and add it to the `files` section in your `package.json`, so that it can be imported separately by your users and run through their bundler's loader.
-
-## Publishing to NPM
-
-We recommend using [np](https://github.com/sindresorhus/np).
+const widgetSchema = [
+  { type: 'widget', selector: '#id', widgetInsertPosition: 'beforebegin', value: '<div>hello world</div>' },
+  { type: 'widget', selector: '#id', widgetInsertPosition: 'afterbegin', value: '<div>hello world</div>' },
+  { type: 'widget', selector: '#id', widgetInsertPosition: 'beforeend', value: '<div>hello world</div>' },
+  { type: 'widget', selector: '#id', widgetInsertPosition: 'afterend', value: '<div>hello world</div>' },
+];
+```

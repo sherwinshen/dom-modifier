@@ -6,77 +6,7 @@ const mutations: Set<Mutation> = new Set();
 const nullController: MutationController = { revert: () => {} };
 const isBrowser = typeof window !== 'undefined' && typeof document !== 'undefined';
 const validAttributeName = /^[a-zA-Z:_][a-zA-Z0-9:_.-]*$/;
-
-let transformContainer: HTMLDivElement;
-let globalObserver: MutationObserver;
-let paused: boolean = false;
-
-function checkPositionSame(currentVal: ElementPositionWithNode | null, newVal: ElementPositionWithNode | null) {
-  return (
-    currentVal &&
-    newVal &&
-    currentVal.parentNode === newVal.parentNode &&
-    currentVal.insertBeforeNode === newVal.insertBeforeNode
-  );
-}
-
-const getTransformedHTML = (html: string = '', id?: string) => {
-  if (!transformContainer) {
-    transformContainer = document.createElement('div');
-  }
-  transformContainer.innerHTML = html;
-  if (id) {
-    transformContainer.setAttribute('id', id);
-    transformContainer.style.display = 'contents';
-    return transformContainer.outerHTML;
-  }
-  return transformContainer.innerHTML;
-};
-
-const getElementRecord = (el: Element): ElementRecord => {
-  let record = elements.get(el);
-  if (!record) {
-    record = { el };
-    elements.set(el, record);
-  }
-  return record;
-};
-
-const deleteWidgetContainers = (record: WidgetRecord) => {
-  // 删除所有 widget 容器（包含所有 widget）
-  widgetPositions.forEach(position => {
-    document.querySelectorAll(`[widget-${position}-id="${record.id}"]`).forEach(dom => dom.remove());
-  });
-};
-const deleteElementPropertyRecord = (el: Element, attr: string, record: ElementPropertyRecord<any, any>) => {
-  const element = elements.get(el);
-  if (!element) return;
-  if (attr === 'widget') {
-    element.widgets?.observer?.disconnect();
-    delete element.widgets;
-    deleteWidgetContainers(record);
-  } else if (attr === 'position') {
-    element.position?.observer?.disconnect();
-    delete element.position;
-    setElementPosition(el, record.originalValue);
-  } else if (attr === 'class') {
-    element.classes?.observer?.disconnect();
-    delete element.classes;
-    setClassNameValue(el, record.originalValue);
-  } else if (attr === 'style') {
-    element.styles?.observer?.disconnect();
-    delete element.styles;
-    setStyleValue(el, record.originalValue);
-  } else if (attr === 'html') {
-    element.html?.observer?.disconnect();
-    delete element.html;
-    setHTMLValue(el, record.originalValue);
-  } else {
-    element.attributes?.[attr]?.observer?.disconnect();
-    delete element.attributes?.[attr];
-    setAttrValue(el, attr, record.originalValue);
-  }
-};
+const widgetPositions = ['beforebegin', 'afterbegin', 'beforeend', 'afterend'];
 
 // 针对不同类型的监听内容
 const getObserverInit = (attr: string, isGlobal?: boolean): MutationObserverInit => {
@@ -87,6 +17,7 @@ const getObserverInit = (attr: string, isGlobal?: boolean): MutationObserverInit
   if (attr === 'widget') {
     return { childList: true, subtree: false, attributes: false, characterData: false };
   }
+  // 只监听父元素的子元素变化
   if (attr === 'position') {
     return { childList: true, subtree: true, attributes: false, characterData: false };
   }
@@ -96,82 +27,17 @@ const getObserverInit = (attr: string, isGlobal?: boolean): MutationObserverInit
   return { childList: false, subtree: false, attributes: true, attributeFilter: [attr] };
 };
 
-function createElementPropertyRecord(
-  el: Element,
-  attr: string,
-  mutationRunner: (record: ElementPropertyRecord<any, any>) => void,
-  getCurrentValue: (el: Element) => any
-) {
-  const currentValue = getCurrentValue(el);
-  const record: ElementPropertyRecord<any, any> = {
-    id: uuidv4(),
-    el,
-    attr,
-    mutations: [],
-    originalValue: currentValue,
-    virtualValue: currentValue,
-    // 监听当前元素变动，针对变更后对应内容出现变动
-    observer: new MutationObserver(() => {
-      if (paused) return;
-
-      // 如果监听元素被删除
-      if (!document.body.contains(el)) {
-        deleteElementPropertyRecord(el, attr, record);
-        elements.delete(el);
-        record.mutations.forEach(mutation => {
-          mutation.elements.delete(el);
-        });
-        return;
-      }
-
-      const currentValue = getCurrentValue(el);
-      // 1. position 场景，位置一致则不处理
-      if (attr === 'position' && checkPositionSame(currentValue, record.virtualValue)) return;
-      // 2. 其他场景，如果当前值和虚拟值相同，则不处理（widget 场景不适用）
-      if (currentValue === record.virtualValue && attr !== 'widget') return;
-      record.originalValue = currentValue;
-      mutationRunner(record);
-    }),
-    mutationRunner,
-    getCurrentValue,
-  };
-  if (attr === 'widget') {
-    record.observer.observe(el, getObserverInit(attr));
-    el.parentNode && record.observer.observe(el.parentNode, getObserverInit(attr));
-  } else {
-    const target = attr === 'position' && el.parentNode ? el.parentNode : el;
-    record.observer.observe(target, getObserverInit(attr));
+const getTransformedHTML = (html: string = '', id?: string) => {
+  const transformContainer = document.createElement('div');
+  transformContainer.innerHTML = html;
+  if (id) {
+    transformContainer.setAttribute('id', id);
+    transformContainer.style.display = 'contents';
+    return transformContainer.outerHTML;
   }
-  return record;
-}
-
-/* ------------------------- 类名处理 ------------------------- */
-// 类名集合与类名字符串之间的转换
-const classNameSetToString = (set: Set<string>): string =>
-  Array.from(set)
-    .filter(Boolean)
-    .join(' ');
-const classNameStringToSet = (val: string): Set<string> => new Set(val.split(/\s+/).filter(Boolean));
-const getClassNameValue = (el: Element) => el.className;
-const setClassNameValue = (el: Element, val: string) => (val ? (el.className = val) : el.removeAttribute('class'));
-const classMutationRunner = (record: ClassnameRecord) => {
-  const val = classNameStringToSet(record.originalValue);
-  record.mutations.forEach(m => m.mutate(val));
-  const newClassName = classNameSetToString(val);
-  if (newClassName !== record.getCurrentValue(record.el)) {
-    setClassNameValue(record.el, newClassName);
-  }
-  record.virtualValue = newClassName;
+  return transformContainer.innerHTML;
 };
-function getElementClassRecord(el: Element): ClassnameRecord {
-  const elementRecord = getElementRecord(el);
-  if (!elementRecord.classes) {
-    elementRecord.classes = createElementPropertyRecord(el, 'class', classMutationRunner, getClassNameValue);
-  }
-  return elementRecord.classes;
-}
 
-/* ------------------------- 样式处理 ------------------------- */
 // 样式对象与样式字符串之间的转换
 const styleStringToObject = (styleStr: string): Record<string, string> => {
   if (!styleStr) return {};
@@ -199,6 +65,140 @@ const styleObjectToString = (styleObj: Record<string, string>): string => {
     .join(' ')
     .trim();
 };
+
+// 类名集合与类名字符串之间的转换
+const classNameSetToString = (set: Set<string>): string =>
+  Array.from(set)
+    .filter(Boolean)
+    .join(' ');
+const classNameStringToSet = (val: string): Set<string> => new Set(val.split(/\s+/).filter(Boolean));
+
+const checkPositionSame = (currentVal: ElementPositionWithNode | null, newVal: ElementPositionWithNode | null) => {
+  return currentVal?.parentNode === newVal?.parentNode && currentVal?.insertBeforeNode === newVal?.insertBeforeNode;
+};
+
+/* ------------------------- 元素记录 ------------------------- */
+const getElementRecord = (el: Element): ElementRecord => {
+  let record = elements.get(el);
+  if (!record) {
+    record = { el };
+    elements.set(el, record);
+  }
+  return record;
+};
+const createElementPropertyRecord = (
+  el: Element,
+  attr: string,
+  mutationRunner: (record: ElementPropertyRecord<any, any>) => void,
+  getCurrentValue: (el: Element) => any
+) => {
+  const currentValue = getCurrentValue(el); // 获取当前值
+  const record: ElementPropertyRecord<any, any> = {
+    elementId: uuidv4(),
+    el,
+    attr,
+    mutations: [],
+    originalValue: currentValue,
+    virtualValue: currentValue,
+    // 监听当前元素变动，针对变更后对应内容出现变动
+    observer: new MutationObserver(() => {
+      if (paused) return; // 暂停监听
+
+      // 如果监听元素被删除
+      if (!document.body.contains(el)) {
+        deleteElementPropertyRecord(el, attr, record);
+        elements.delete(el);
+        record.mutations.forEach(mutation => {
+          mutation.elements.delete(el);
+        });
+        return;
+      }
+
+      const currentValue = getCurrentValue(el);
+      // 1. position 场景，位置一致则不处理
+      if (attr === 'position' && checkPositionSame(currentValue, record.virtualValue)) return;
+      // 2. 其他场景，如果当前值和虚拟值相同，则不处理（widget 场景不适用）
+      if (currentValue === record.virtualValue && attr !== 'widget') return;
+      record.originalValue = currentValue;
+      mutationRunner(record);
+    }),
+    mutationRunner,
+    getCurrentValue,
+  };
+  // 开启元素监听
+  if (attr === 'widget') {
+    record.observer.observe(el, getObserverInit(attr));
+    el.parentNode && record.observer.observe(el.parentNode, getObserverInit(attr));
+  } else {
+    const target = attr === 'position' && el.parentNode ? el.parentNode : el;
+    record.observer.observe(target, getObserverInit(attr));
+  }
+  return record;
+};
+
+const deleteWidgetContainers = (elementId: string) => {
+  // 删除所有 widget 容器（包含所有 widget）
+  widgetPositions.forEach(position => {
+    document.querySelectorAll(`[widget-${position}-id="${elementId}"]`).forEach(dom => dom.remove());
+  });
+};
+const deleteElementPropertyRecord = (el: Element, attr: string, record: ElementPropertyRecord<any, any>) => {
+  const elementRecord = elements.get(el);
+  if (!elementRecord) return;
+  if (attr === 'html') {
+    elementRecord.html?.observer?.disconnect();
+    delete elementRecord.html;
+    setHTMLValue(el, record.originalValue);
+    return;
+  }
+  if (attr === 'class') {
+    elementRecord.classes?.observer?.disconnect();
+    delete elementRecord.classes;
+    setClassNameValue(el, record.originalValue);
+    return;
+  }
+  if (attr === 'style') {
+    elementRecord.styles?.observer?.disconnect();
+    delete elementRecord.styles;
+    setStyleValue(el, record.originalValue);
+    return;
+  }
+  if (attr === 'widget') {
+    elementRecord.widgets?.observer?.disconnect();
+    delete elementRecord.widgets;
+    deleteWidgetContainers(record.elementId);
+  }
+  if (attr === 'position') {
+    elementRecord.position?.observer?.disconnect();
+    delete elementRecord.position;
+    setElementPosition(el, record.originalValue);
+  }
+  elementRecord.attributes?.[attr]?.observer?.disconnect();
+  delete elementRecord.attributes?.[attr];
+  setAttrValue(el, attr, record.originalValue);
+};
+
+/* ------------------------- 类名处理 ------------------------- */
+const getClassNameValue = (el: Element) => el.className;
+const setClassNameValue = (el: Element, val: string) => (val ? (el.className = val) : el.removeAttribute('class'));
+const classMutationRunner = (record: ClassnameRecord) => {
+  const val = classNameStringToSet(record.originalValue);
+  record.mutations.forEach(m => m.mutate(val));
+  const newClassName = classNameSetToString(val);
+  if (newClassName !== record.getCurrentValue(record.el)) {
+    setClassNameValue(record.el, newClassName);
+  }
+  record.virtualValue = newClassName;
+};
+const getElementClassRecord = (el: Element): ClassnameRecord => {
+  const elementRecord = getElementRecord(el);
+  if (!elementRecord.classes) {
+    elementRecord.classes = createElementPropertyRecord(el, 'class', classMutationRunner, getClassNameValue);
+  }
+  return elementRecord.classes;
+};
+
+/* ------------------------- 样式处理 ------------------------- */
 const getStyleValue = (el: Element) => el.getAttribute('style') || '';
 const setStyleValue = (el: Element, val: string) => (val ? el.setAttribute('style', val) : el.removeAttribute('style'));
 const styleMutationRunner = (record: StyleRecord) => {
@@ -210,16 +210,16 @@ const styleMutationRunner = (record: StyleRecord) => {
   }
   record.virtualValue = newStyle;
 };
-function getElementStyleRecord(el: Element): StyleRecord {
+const getElementStyleRecord = (el: Element): StyleRecord => {
   const elementRecord = getElementRecord(el);
   if (!elementRecord.styles) {
     elementRecord.styles = createElementPropertyRecord(el, 'style', styleMutationRunner, getStyleValue);
   }
   return elementRecord.styles;
-}
+};
 
 /* ------------------------- 属性处理 ------------------------- */
-const getAttrValue = (attr: string) => (el: Element) => el.getAttribute(attr) ?? '';
+const getAttrValue = (attr: string) => (el: Element) => el.getAttribute(attr);
 const setAttrValue = (el: Element, attrName: string, val: string | null) =>
   val !== null && attrName ? el.setAttribute(attrName, val) : el.removeAttribute(attrName);
 const attrMutationRunner = (record: AttributeRecord) => {
@@ -230,7 +230,7 @@ const attrMutationRunner = (record: AttributeRecord) => {
   }
   record.virtualValue = val;
 };
-function getElementAttributeRecord(el: Element, attr: string): AttributeRecord {
+const getElementAttributeRecord = (el: Element, attr: string): AttributeRecord => {
   const elementRecord = getElementRecord(el);
   if (!elementRecord.attributes) {
     elementRecord.attributes = {};
@@ -239,7 +239,7 @@ function getElementAttributeRecord(el: Element, attr: string): AttributeRecord {
     elementRecord.attributes[attr] = createElementPropertyRecord(el, attr, attrMutationRunner, getAttrValue(attr));
   }
   return elementRecord.attributes[attr];
-}
+};
 
 /* ------------------------- 内容处理 ------------------------- */
 const getHTMLValue = (el: Element) => el.innerHTML;
@@ -253,18 +253,24 @@ const htmlMutationRunner = (record: HtmlRecord) => {
   }
   record.virtualValue = val;
 };
-function getElementHTMLRecord(el: Element): HtmlRecord {
+const getElementHTMLRecord = (el: Element): HtmlRecord => {
   const elementRecord = getElementRecord(el);
   if (!elementRecord.html) {
     elementRecord.html = createElementPropertyRecord(el, 'html', htmlMutationRunner, getHTMLValue);
   }
   return elementRecord.html;
-}
+};
 
 /* ------------------------- 位置移动 ------------------------- */
 const getElementPosition = (el: Element) =>
-  ({ parentNode: el.parentElement, insertBeforeNode: el.nextElementSibling } as ElementPositionWithNode);
+  ({
+    parentNode: el.parentElement,
+    insertBeforeNode: el.nextElementSibling,
+  } as ElementPositionWithNode);
 const setElementPosition = (el: Element, value: ElementPositionWithNode) => {
+  if (!value || !value.parentNode) {
+    return;
+  }
   if (value.insertBeforeNode && !value.parentNode.contains(value.insertBeforeNode)) {
     return;
   }
@@ -280,7 +286,7 @@ const getPositionNodeFromSelector = ({
   if (insertBeforeSelector && !insertBeforeNode) return null;
   return { parentNode, insertBeforeNode };
 };
-const positionMutationRunner = (record: ElementPropertyRecord<any, any>) => {
+const positionMutationRunner = (record: PositionRecord) => {
   let val = record.originalValue;
   // 只生效最后一次的变更
   record.mutations.forEach(m => {
@@ -288,39 +294,36 @@ const positionMutationRunner = (record: ElementPropertyRecord<any, any>) => {
     val = getPositionNodeFromSelector(selectors) || val;
   });
   const currentVal = record.getCurrentValue(record.el);
-  if (!checkPositionSame(currentVal, val)) {
-    setElementPosition(record.el, val || record.originalValue);
+  if (val && !checkPositionSame(currentVal, val)) {
+    setElementPosition(record.el, val);
   }
   record.virtualValue = val;
 };
-function getElementPositionRecord(el: Element): PositionRecord {
+const getElementPositionRecord = (el: Element): PositionRecord => {
   const elementRecord = getElementRecord(el);
   if (!elementRecord.position) {
     elementRecord.position = createElementPropertyRecord(el, 'position', positionMutationRunner, getElementPosition);
   }
   return elementRecord.position;
-}
+};
 
 /* ------------------------- 组件插入 ------------------------- */
 const getWidgetValue = (_: Element) => null;
-const setWidgetValue = (el: Element, id: string, value: InsertWidget, containerElement: Element | null) => {
+const setWidgetValue = (el: Element, elementId: string, value: InsertWidget, containerElement: Element | null) => {
   if (containerElement) {
     containerElement.insertAdjacentHTML('beforeend', value.content ?? '');
   } else {
     const dom = document.createElement('div');
-    dom.setAttribute(`widget-${value.position}-id`, id);
+    dom.setAttribute(`widget-${value.position}-id`, elementId);
     dom.style.display = 'contents';
     dom.innerHTML = value.content ?? '';
     el.insertAdjacentElement(value.position, dom);
   }
 };
-const widgetPositions = ['beforebegin', 'afterbegin', 'beforeend', 'afterend'];
-/**
- * 检查 widget 的容器元素，如果位置不对则直接删除
- */
-const checkWidgetContainer = (el: Element, id: string) => {
+// 检查 widget 的容器元素，如果位置不对则直接删除
+const checkWidgetContainer = (el: Element, elementId: string) => {
   widgetPositions.forEach(position => {
-    const dom = document.querySelector(`[widget-${position}-id="${id}"]`);
+    const dom = document.querySelector(`[widget-${position}-id="${elementId}"]`);
     if (!dom) return;
     position === 'beforebegin' && dom.nextSibling !== el && dom.remove();
     position === 'afterbegin' && el.firstChild !== dom && dom.remove();
@@ -329,29 +332,29 @@ const checkWidgetContainer = (el: Element, id: string) => {
   });
 };
 const widgetMutationRunner = (record: WidgetRecord) => {
-  checkWidgetContainer(record.el, record.id);
+  checkWidgetContainer(record.el, record.elementId);
   record.mutations.forEach(mutation => {
     const insertWidget = mutation.mutate();
-    insertWidget.content = getTransformedHTML(insertWidget.content ?? '', mutation.id);
-    const containerElement = document.querySelector(`[widget-${insertWidget.position}-id="${record.id}"]`);
-    const targetElement = document.getElementById(mutation.id);
+    insertWidget.content = getTransformedHTML(insertWidget.content ?? '', mutation.mutationId);
+    const containerElement = document.querySelector(`[widget-${insertWidget.position}-id="${record.elementId}"]`);
+    const targetElement = document.getElementById(mutation.mutationId);
     if (containerElement && targetElement && containerElement.contains(targetElement)) return;
     if (containerElement && targetElement && !containerElement.contains(targetElement)) {
       targetElement.remove();
     }
-    setWidgetValue(record.el, record.id, insertWidget, containerElement);
+    setWidgetValue(record.el, record.elementId, insertWidget, containerElement);
   });
 };
-function getElementWidgetRecord(el: Element): WidgetRecord {
+const getElementWidgetRecord = (el: Element): WidgetRecord => {
   const elementRecord = getElementRecord(el);
   if (!elementRecord.widgets) {
     elementRecord.widgets = createElementPropertyRecord(el, 'widget', widgetMutationRunner, getWidgetValue);
   }
   return elementRecord.widgets;
-}
+};
 
 /* ------------------------- 公共处理 ------------------------- */
-function startMutating(mutation: Mutation, element: Element) {
+const startMutating = (mutation: Mutation, element: Element) => {
   let record: ElementPropertyRecord<any, any> | null = null;
   if (mutation.kind === 'widget') {
     record = getElementWidgetRecord(element);
@@ -369,12 +372,11 @@ function startMutating(mutation: Mutation, element: Element) {
   if (!record) return;
   record.mutations.push(mutation);
   record.mutationRunner(record);
-}
-
-function applyMutation(mutation: Mutation) {
+};
+const applyMutation = (mutation: Mutation) => {
   const existingElements = new Set(mutation.elements);
   const matchingElements = document.querySelectorAll(mutation.selector);
-  // 如果有多个匹配元素或者已经存在元素变更，则不执行变更
+  // widget 和 position 类型变更，如果匹配到多个元素，则不执行变更
   if (['widget', 'position'].includes(mutation.kind) && (matchingElements.length > 1 || existingElements.size > 0)) {
     return;
   }
@@ -383,20 +385,14 @@ function applyMutation(mutation: Mutation) {
     mutation.elements.add(element);
     startMutating(mutation, element);
   });
-}
-
-function applyAllMutations() {
+};
+const applyAllMutations = () => {
   mutations.forEach(applyMutation);
-}
+};
 
-function stopMutating(mutation: Mutation, element: Element) {
+const stopMutating = (mutation: Mutation, element: Element) => {
   let record: ElementPropertyRecord<any, any> | null = null;
-  if (mutation.kind === 'widget') {
-    record = getElementWidgetRecord(element);
-    document.getElementById(mutation.id)?.remove();
-  } else if (mutation.kind === 'position') {
-    record = getElementPositionRecord(element);
-  } else if (mutation.kind === 'html') {
+  if (mutation.kind === 'html') {
     record = getElementHTMLRecord(element);
   } else if (mutation.kind === 'class') {
     record = getElementClassRecord(element);
@@ -404,6 +400,10 @@ function stopMutating(mutation: Mutation, element: Element) {
     record = getElementStyleRecord(element);
   } else if (mutation.kind === 'attribute') {
     record = getElementAttributeRecord(element, mutation.attribute);
+  } else if (mutation.kind === 'position') {
+    record = getElementPositionRecord(element);
+  } else if (mutation.kind === 'widget') {
+    record = getElementWidgetRecord(element);
   }
   if (!record) return;
   const index = record.mutations.indexOf(mutation);
@@ -414,15 +414,14 @@ function stopMutating(mutation: Mutation, element: Element) {
   } else {
     record.mutationRunner(record);
   }
-}
-
-function revertMutation(mutation: Mutation) {
+};
+const revertMutation = (mutation: Mutation) => {
   mutation.elements.forEach(el => stopMutating(mutation, el));
   mutation.elements.clear();
   mutations.delete(mutation);
-}
+};
 
-function newMutation(m: Mutation): MutationController {
+const newMutation = (m: Mutation): MutationController => {
   if (!isBrowser) return nullController;
   mutations.add(m);
   applyMutation(m);
@@ -431,14 +430,41 @@ function newMutation(m: Mutation): MutationController {
       revertMutation(m);
     },
   };
-}
+};
 
 /* ------------------------- 全局监听 ------------------------- */
+let globalObserver: MutationObserver; // 全局监听器
+let paused: boolean = false; // 是否暂停监听
+function debounce<T extends (...args: any[]) => any>(func: T, wait: number, immediate: boolean = false) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let lastArgs: Parameters<T> | null = null;
+  let lastThis: any;
+
+  return function(this: any, ...args: Parameters<T>) {
+    lastArgs = args;
+    lastThis = this;
+    if (immediate && !timeoutId) {
+      func.apply(lastThis, lastArgs);
+    }
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = setTimeout(() => {
+      if (!immediate) {
+        func.apply(lastThis, lastArgs!);
+      }
+      timeoutId = null;
+      lastArgs = null;
+      lastThis = null;
+    }, wait);
+  };
+}
+const debouncedApplyAllMutations = debounce(applyAllMutations, 100);
 export function connectGlobalObserver() {
   if (!isBrowser) return;
   if (!globalObserver) {
     globalObserver = new MutationObserver(() => {
-      applyAllMutations();
+      debouncedApplyAllMutations();
     });
   }
   applyAllMutations();
@@ -459,187 +485,132 @@ export function resumeGlobalObserver() {
 }
 
 /* ------------------------- 执行函数 ------------------------- */
-
-export function widget(selector: WidgetMutation['selector'], mutate: WidgetMutation['mutate']) {
-  return newMutation({
-    id: uuidv4(),
-    kind: 'widget',
-    elements: new Set(),
-    mutate,
-    selector,
-  });
-}
-
-export function position(selector: PositionMutation['selector'], mutate: PositionMutation['mutate']) {
-  return newMutation({
-    id: uuidv4(),
-    kind: 'position',
-    elements: new Set(),
-    mutate,
-    selector,
-  });
-}
-
-export function classes(selector: ClassnameMutation['selector'], mutate: ClassnameMutation['mutate']) {
-  return newMutation({
-    id: uuidv4(),
-    kind: 'class',
-    elements: new Set(),
-    mutate,
-    selector,
-  });
-}
-
-export function styles(selector: StyleMutation['selector'], mutate: StyleMutation['mutate']) {
-  return newMutation({
-    id: uuidv4(),
-    kind: 'style',
-    elements: new Set(),
-    mutate,
-    selector,
-  });
-}
-
-export function html(selector: HtmlMutation['selector'], mutate: HtmlMutation['mutate']) {
-  return newMutation({
-    id: uuidv4(),
-    kind: 'html',
-    elements: new Set(),
-    mutate,
-    selector,
-  });
-}
-
-export function attribute(
+export const html = (selector: HtmlMutation['selector'], mutate: HtmlMutation['mutate']) => {
+  return newMutation({ mutationId: uuidv4(), kind: 'html', elements: new Set(), mutate, selector });
+};
+export const classes = (selector: ClassnameMutation['selector'], mutate: ClassnameMutation['mutate']) => {
+  return newMutation({ mutationId: uuidv4(), kind: 'class', elements: new Set(), mutate, selector });
+};
+export const styles = (selector: StyleMutation['selector'], mutate: StyleMutation['mutate']) => {
+  return newMutation({ mutationId: uuidv4(), kind: 'style', elements: new Set(), mutate, selector });
+};
+export const position = (selector: PositionMutation['selector'], mutate: PositionMutation['mutate']) => {
+  return newMutation({ mutationId: uuidv4(), kind: 'position', elements: new Set(), mutate, selector });
+};
+export const widget = (selector: WidgetMutation['selector'], mutate: WidgetMutation['mutate']) => {
+  return newMutation({ mutationId: uuidv4(), kind: 'widget', elements: new Set(), mutate, selector });
+};
+export const attribute = (
   selector: AttributeMutation['selector'],
   attribute: AttributeMutation['attribute'],
   mutate: AttributeMutation['mutate']
-) {
+) => {
   if (!validAttributeName.test(attribute)) return nullController;
-  if (attribute === 'class' || attribute === 'className') {
-    return classes(selector, (classnames => {
-      const mutatedClassnames = mutate(Array.from(classnames).join(' '));
-      classnames.clear();
-      if (!mutatedClassnames) return;
-      mutatedClassnames
-        .split(/\s+/g)
-        .filter(Boolean)
-        .forEach(c => classnames.add(c));
-    }) as ClassnameMutation['mutate']);
-  }
-  return newMutation({
-    id: uuidv4(),
-    kind: 'attribute',
-    elements: new Set(),
-    attribute,
-    mutate,
-    selector,
-  });
-}
-
-export function declarative({
-  selector,
-  attribute: attr,
-  action,
-  value,
-  domRemoveType,
-  parentSelector,
-  insertBeforeSelector,
-  widgetInsertPosition,
-}: OperateSchema): MutationController {
-  if (attr === 'html') {
-    if (action === 'set') {
-      return html(selector, () => value ?? '');
-    } else if (action === 'append') {
-      return html(selector, val => val + (value ?? ''));
-    } else if (action === 'remove' && domRemoveType === 'display') {
-      return styles(selector, (styleObj: Record<string, string>) => (styleObj.display = 'none'));
-    } else if (action === 'remove' && domRemoveType === 'opacity') {
-      return styles(selector, (styleObj: Record<string, string>) => (styleObj.opacity = '0'));
-    } else if (action === 'remove' && domRemoveType === 'visibility') {
-      return styles(selector, (styleObj: Record<string, string>) => (styleObj.visibility = 'hidden'));
+  return newMutation({ mutationId: uuidv4(), kind: 'attribute', elements: new Set(), attribute, mutate, selector });
+};
+export const declarative = (schema: OperateSchema): MutationController => {
+  const { selector } = schema;
+  if (schema.type === 'html') {
+    if (schema.action === 'remove') {
+      return html(selector, () => '');
+    } else if (schema.action === 'set') {
+      return html(selector, () => schema.value ?? '');
+    } else if (schema.action === 'append') {
+      return html(selector, (val: string) => val + (schema.value ?? ''));
+    } else if (schema.action === 'custom') {
+      return html(selector, schema.value);
     }
-  } else if (attr === 'class') {
-    if (action === 'set') {
+  } else if (schema.type === 'class') {
+    if (schema.action === 'remove') {
       return classes(selector, (val: Set<string>) => {
-        val.clear();
-        if (value) val.add(value);
-      });
-    } else if (action === 'append') {
-      return classes(selector, (val: Set<string>) => {
-        if (value) {
-          const classNameSet = classNameStringToSet(value);
-          classNameSet.forEach(item => val.add(item));
-        }
-      });
-    } else if (action === 'remove') {
-      return classes(selector, val => {
-        if (value) {
-          const classNameSet = classNameStringToSet(value);
+        if (schema.value) {
+          const classNameSet = classNameStringToSet(schema.value);
           classNameSet.forEach(item => val.delete(item));
         } else {
           val.clear();
         }
       });
+    } else if (schema.action === 'set') {
+      return classes(selector, (val: Set<string>) => {
+        val.clear();
+        if (schema.value) val.add(schema.value);
+      });
+    } else if (schema.action === 'append') {
+      return classes(selector, (val: Set<string>) => {
+        if (schema.value) {
+          const classNameSet = classNameStringToSet(schema.value);
+          classNameSet.forEach(item => val.add(item));
+        }
+      });
+    } else if (schema.action === 'custom') {
+      return classes(selector, schema.value);
     }
-  } else if (attr === 'style') {
-    if (action === 'set') {
+  } else if (schema.type === 'style') {
+    if (schema.action === 'remove') {
       return styles(selector, (styleObj: Record<string, string>) => {
-        const newStyleObj = styleStringToObject(value ?? '');
-        Object.keys(styleObj).forEach(key => delete styleObj[key]);
-        Object.assign(styleObj, newStyleObj);
-      });
-    } else if (action === 'append') {
-      return styles(selector, (styleObj: Record<string, string>) => {
-        const newStyleObj = styleStringToObject(value ?? '');
-        Object.assign(styleObj, newStyleObj);
-      });
-    } else if (action === 'remove') {
-      return styles(selector, (styleObj: Record<string, string>) => {
-        if (value) {
-          const styleAttrs = (value ?? '').split(/\s+/).filter(Boolean);
-          styleAttrs.forEach(attr => {
-            delete styleObj[attr];
-          });
+        if (schema.value) {
+          const styleAttrs = (schema.value ?? '').split(/\s+/).filter(Boolean);
+          styleAttrs.forEach(attr => delete styleObj[attr]);
         } else {
           Object.keys(styleObj).forEach(key => delete styleObj[key]);
         }
       });
+    } else if (schema.action === 'set') {
+      return styles(selector, (styleObj: Record<string, string>) => {
+        const newStyleObj = styleStringToObject(schema.value ?? '');
+        Object.keys(styleObj).forEach(key => delete styleObj[key]);
+        Object.assign(styleObj, newStyleObj);
+      });
+    } else if (schema.action === 'append') {
+      return styles(selector, (styleObj: Record<string, string>) => {
+        const newStyleObj = styleStringToObject(schema.value ?? '');
+        Object.assign(styleObj, newStyleObj);
+      });
+    } else if (schema.action === 'custom') {
+      return styles(selector, schema.value);
     }
-  } else if (attr === 'position') {
+  } else if (schema.type === 'attribute') {
+    const { attribute: attr } = schema;
+    if (schema.action === 'remove') {
+      return attribute(selector, attr, () => null);
+    } else if (schema.action === 'set') {
+      return attribute(selector, attr, () => schema.value ?? '');
+    } else if (schema.action === 'append') {
+      return attribute(selector, attr, (val: string | null) =>
+        val !== null ? val + (schema.value ?? '') : schema.value ?? ''
+      );
+    } else if (schema.action === 'custom') {
+      return attribute(selector, attr, schema.value);
+    }
+  } else if (schema.type === 'position') {
+    const { insertBeforeSelector, parentSelector } = schema;
     if (parentSelector) {
       return position(selector, () => ({
         insertBeforeSelector,
         parentSelector,
       }));
     }
-  } else if (attr === 'widget') {
+  } else if (schema.type === 'widget') {
+    const { value, widgetInsertPosition } = schema;
     if (widgetInsertPosition && value) {
       return widget(selector, () => ({
         position: widgetInsertPosition,
         content: value,
       }));
     }
-  } else {
-    if (action === 'append') {
-      return attribute(selector, attr, (val: string | null) => (val !== null ? val + (value ?? '') : value ?? ''));
-    } else if (action === 'set') {
-      return attribute(selector, attr, () => value ?? '');
-    } else if (action === 'remove') {
-      return attribute(selector, attr, () => null);
-    }
   }
-  return nullController;
-}
 
-function operate(operateSchemas: OperateSchema[]): MutationController[] {
+  return nullController;
+};
+
+const domModifier = (schemas: OperateSchema[]): MutationController[] => {
   const mutationControllers = [] as MutationController[];
-  (operateSchemas || []).forEach(operateSchema => {
-    mutationControllers.push(declarative(operateSchema));
+  (schemas || []).forEach(schema => {
+    mutationControllers.push(declarative(schema));
   });
   return mutationControllers;
-}
-
-export default operate;
+};
 
 connectGlobalObserver();
+
+export default domModifier;

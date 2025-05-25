@@ -1,6 +1,7 @@
 {
   "version": "0.1.0",
   "license": "MIT",
+  "description": "A simple library for operating DOM elements without manipulating the DOM directly on top of HTML you don’t control",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
   "files": [
@@ -31,16 +32,16 @@
     "singleQuote": true,
     "trailingComma": "es5"
   },
-  "name": "dom-operator",
+  "name": "dom-modifier",
   "author": "sherwinshen",
-  "module": "dist/dom-operator.esm.js",
+  "module": "dist/dom-modifier.esm.js",
   "size-limit": [
     {
-      "path": "dist/dom-operator.cjs.production.min.js",
+      "path": "dist/dom-modifier.cjs.production.min.js",
       "limit": "10 KB"
     },
     {
-      "path": "dist/dom-operator.esm.js",
+      "path": "dist/dom-modifier.esm.js",
       "limit": "10 KB"
     }
   ],
@@ -55,5 +56,17 @@
   },
   "dependencies": {
     "uuid": "^9.0.1"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sherwinshen/dom-modifier.git"
+  },
+  "homepage": "https://github.com/sherwinshen/dom-modifier#readme",
+  "bugs": "https://github.com/sherwinshen/dom-modifier/issues",
+  "keywords": [
+    "dom",
+    "mutator",
+    "modifier",
+    "typescript"
+  ]
 }
