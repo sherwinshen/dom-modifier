@@ -506,6 +506,17 @@ export const attribute = (
   mutate: AttributeMutation['mutate']
 ) => {
   if (!validAttributeName.test(attribute)) return nullController;
+  if (attribute === 'class' || attribute === 'className') {
+    return classes(selector, (classnames => {
+      const mutatedClassnames = mutate(Array.from(classnames).join(' '));
+      classnames.clear();
+      if (!mutatedClassnames) return;
+      mutatedClassnames
+        .split(/\s+/g)
+        .filter(Boolean)
+        .forEach(c => classnames.add(c));
+    }) as ClassnameMutation['mutate']);
+  }
   return newMutation({ mutationId: uuidv4(), kind: 'attribute', elements: new Set(), attribute, mutate, selector });
 };
 export const declarative = (schema: OperateSchema): MutationController => {
